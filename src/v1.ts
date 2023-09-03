@@ -1,4 +1,5 @@
-import { readLn, Task, Failure, pipe, logAndByPass, match, ignore } from './libs'
+import { readLn, Task, Failure, Funcs } from './libs'
+const { pipe, logAndByPass, match, ignore } = Funcs
 
 const runController = (ctrl: Task<Failure, unknown>) =>
   ctrl.map(pipe(logAndByPass('Output: '), () => 'Done')).rejectMap(Failure.log)

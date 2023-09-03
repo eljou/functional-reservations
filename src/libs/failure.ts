@@ -20,3 +20,8 @@ export const Failure = {
     console.groupEnd()
   },
 }
+
+export type ParsingFailure = Failure<'PARSING'>
+export const ParsingFailure = {
+  create: (err: Error): ParsingFailure => Failure.create('PARSING', `Error at parsing: ${err.message}`, err),
+}
