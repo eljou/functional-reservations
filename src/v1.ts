@@ -4,7 +4,7 @@ const { pipe, logAndByPass, match, ignore } = Funcs
 const runController = (ctrl: Task<Failure, unknown>) =>
   ctrl.map(pipe(logAndByPass('Output: '), () => 'Done')).rejectMap(Failure.log)
 
-const runWorkflow = () =>
+const routeWorkflow = () =>
   readLn(`Enter a use-case to run:
   [1] - create reservation
   [0] - exit
@@ -17,7 +17,7 @@ const runWorkflow = () =>
 
 // --- run
 async function application() {
-  const workflowResponse = await runWorkflow().toPromise().catch(ignore)
+  const workflowResponse = await routeWorkflow().toPromise().catch(ignore)
   console.log('... \n\n')
 
   if (workflowResponse != 'Exit') return application()

@@ -1,4 +1,4 @@
-import { readLn, Either, Task, Funcs, List, z, Schema, File, Failure, ParsingFailure } from './libs'
+import { readLn, Either, Task, Funcs, List, z, Schema, File, Failure, ParsingFailure, Maybe } from './libs'
 const {
   pipe,
   tap,
@@ -73,14 +73,17 @@ const DbFailure = {
 }
 
 interface ReservationsRepository {
+  findById: (id: string) => Task<DbFailure, Maybe<Reservation>>
   findByDate: (d: Date) => Task<DbFailure, List<Reservation>>
   saveReservation: (r: Reservation) => Task<DbFailure, void>
 }
 
-type Input = Parameters<typeof Reservation.tryCreate>[0]
-type UseCaseErrors = Failure<'DB_FAILURE'> | Failure<'NO_CAPACITY'> | ValidationFailure
+// --- Application use cases
 
-export const makeTryAcceptReservation =
+type Input = Parameters<typeof Reservation.tryCreate>[0]
+type UseCaseErrors = DbFailure | Failure<'NO_CAPACITY'> | ValidationFailure
+
+const makeTryAcceptReservation =
   (db: ReservationsRepository) =>
   (totalCapacity: number) =>
   (input: Input): Task<UseCaseErrors, Reservation> => {
@@ -95,6 +98,18 @@ export const makeTryAcceptReservation =
       )
       .chain(Task.tap(db.saveReservation))
   }
+
+const makeGetReservationById =
+  (db: ReservationsRepository) =>
+  (id: string): Task<DbFailure | Failure<'NOT_FOUND'>, Reservation> =>
+    db
+      .findById(id)
+      .chain(
+        pipe(
+          mb => mb.toEither(Failure.create('NOT_FOUND', `Reservation with id: ${id} was not found`)),
+          Task.fromEither,
+        ),
+      )
 
 //-- Infra
 const makeFileRepo = (): ReservationsRepository => {
@@ -112,20 +127,23 @@ const makeFileRepo = (): ReservationsRepository => {
 
   const deserializeReservation = deserializeFromBase64(dbSchema)
 
+  const getRecords = () =>
+    File.fsReadFile(dbPath)
+      .map(
+        pipe(
+          content => content.split('\n').filter(str => str.trim()),
+          List.fromArray,
+          lines => lines.map(deserializeReservation),
+          ls => ls.sequenceEither<ParsingFailure, Reservation>(),
+        ),
+      )
+      .chain(Task.fromEither)
+      .rejectMap(f => DbFailure.create(new Error(`${f.code}: ${f.message}`)))
+
   return {
-    findByDate: date =>
-      File.fsReadFile(dbPath)
-        .map(
-          pipe(
-            content => content.split('\n').filter(str => str.trim()),
-            List.fromArray,
-            lines => lines.map(deserializeReservation),
-            ls => ls.sequenceEither<ParsingFailure, Reservation>(),
-            e => e.map(ls => ls.filter(r => dateToStr(r.date) == dateToStr(date))),
-          ),
-        )
-        .chain(Task.fromEither)
-        .rejectMap(f => DbFailure.create(new Error(`${f.code}: ${f.message}`))),
+    findById: id => getRecords().map(ls => ls.find(r => r.id == id)),
+
+    findByDate: date => getRecords().map(ls => ls.filter(r => dateToStr(r.date) == dateToStr(date))),
 
     saveReservation: reservation =>
       File.fsAppendToFile(dbPath, serializeReservation(reservation)).rejectMap(f =>
@@ -135,18 +153,26 @@ const makeFileRepo = (): ReservationsRepository => {
 }
 
 //-- Dependency Inyection
-const tryAcceptReservation = makeTryAcceptReservation(makeFileRepo())
+const fileRepo = makeFileRepo()
+
+const tryAcceptReservation = makeTryAcceptReservation(fileRepo)
+const getReservationById = makeGetReservationById(fileRepo)
 
 //-- Controllers
 const readClientName = () => readLn('Your name: ')
 
 const readSeats = () => readLn('Seats to reserve: ').chain(pipe(parseStrToNumber, Task.fromEither))
 
-const initCreateReservation = () =>
+const runCreateReservation = () =>
   readClientName()
     .chain(clientName => readSeats().map(seats => ({ clientName, seats })))
     .map(tap(() => console.log('-----')))
     .chain(tryAcceptReservation(30 /* move to ENV */))
+
+const runGetReservationById = () =>
+  readLn('Reservation id: ')
+    .map(tap(() => console.log('-----')))
+    .chain(getReservationById)
 
 // --- App
 const runController = (ctrl: Task<Failure, unknown>) =>
@@ -155,10 +181,12 @@ const runController = (ctrl: Task<Failure, unknown>) =>
 const routeWorkflow = () =>
   readLn(`Enter a use-case to run:
   [1] - create reservation
+  [2] - get reservation by id
   [0] - exit
 `).chain(option =>
     match<string, Task<void, string>>(option)
-      .with('1', pipe(initCreateReservation, runController))
+      .with('1', pipe(runCreateReservation, runController))
+      .with('2', pipe(runGetReservationById, runController))
       .with('0', () => Task.of('Exit'))
       .otherwise(() => Task.of('Unknown command')),
   )
@@ -171,4 +199,4 @@ async function application() {
   if (workflowResponse != 'Exit') return application()
 }
 
-application()
+application().catch(console.error)
