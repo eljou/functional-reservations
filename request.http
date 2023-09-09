@@ -1,0 +1,18 @@
+POST http://localhost:3030/reservation
+Content-Type: application/json
+
+{
+  "clientName": "Jhon",
+  "seats": 3
+}
+
+###
+GET http://localhost:3030/reservation/a052827062655fc3fdbddb6a50a660c8
+
+###
+GET http://localhost:3030/reservation/client/Jhon
+Content-Type: application/json
+
+{
+  "count": 3
+}

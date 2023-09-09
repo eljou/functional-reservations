@@ -25,3 +25,8 @@ export type ParsingFailure = Failure<'PARSING'>
 export const ParsingFailure = {
   create: (err: Error): ParsingFailure => Failure.create('PARSING', `Error at parsing: ${err.message}`, err),
 }
+
+export type ValidationFailure = Failure<'VALIDATION'>
+export const ValidationFailure = {
+  create: (err: Error): ValidationFailure => Failure.create('VALIDATION', `Error validating: ${err.message}`, err),
+}
