@@ -1,6 +1,6 @@
 import { pipe } from 'ramda'
 import { Schema } from 'zod'
-import { Either } from 'monet'
+import { Either, List } from 'monet'
 import { deserialize, serialize } from 'bson'
 import { match } from 'ts-pattern'
 import { ParsingFailure } from './failure'
@@ -45,3 +45,18 @@ export const logAndByPass =
   }
 
 export const ignore = () => {}
+
+export const takeN =
+  <T>(n: number) =>
+  (list: List<T>): List<T> => {
+    const take = (xs: List<T>, i: number = n): List<T> => {
+      const head = xs.head()
+
+      if (!head) return xs
+      if (i == 0) return List.fromArray([])
+      if (i == 1) return List.of(head)
+      return (List.of(head) as List<T>).concat(take(xs.tail(), i - 1))
+    }
+
+    return take(list.reverse())
+  }
