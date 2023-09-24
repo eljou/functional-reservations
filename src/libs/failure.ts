@@ -19,6 +19,8 @@ export const Failure = {
     f.error.forEach(console.debug)
     console.groupEnd()
   },
+
+  toError: (f: Failure): Error => new Error(`${f.code}: ${f.message}`),
 }
 
 export type ParsingFailure = Failure<'PARSING'>
