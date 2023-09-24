@@ -23,4 +23,5 @@ async function application() {
   if (workflowResponse != 'Exit') return application()
 }
 
-application()
+// eslint-disable-next-line functional/no-expression-statements
+application().catch(console.error)

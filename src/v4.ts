@@ -94,7 +94,7 @@ const makeTryAcceptReservation =
       .chain(res =>
         db
           .findWhen(r => dateToStr(r.date) == dateToStr(res.date))
-          .map(list => tryAcceptReservation(res)(list))
+          .map(tryAcceptReservation(res))
           .chain(Task.fromEither),
       )
       .chain(Task.tap(db.saveReservation))
@@ -138,7 +138,7 @@ const makeFileRepo = (): ReservationsRepository => {
       .map(
         pipe(
           content => content.split('\n').filter(str => str.trim()),
-          List.fromArray,
+          List.fromArray.bind(List),
           lines => lines.map(deserializeReservation),
           ls => ls.sequenceEither<ParsingFailure, Reservation>(),
         ),
@@ -217,4 +217,5 @@ async function application() {
   if (workflowResponse != 'Exit') return application()
 }
 
+// eslint-disable-next-line functional/no-expression-statements
 application().catch(console.error)

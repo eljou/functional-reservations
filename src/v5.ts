@@ -1,5 +1,5 @@
-import restify from 'restify'
-import errors from 'restify-errors'
+import express from 'express'
+import httpErrors from 'http-errors'
 import { Either, Task, Funcs, List, z, Schema, File, Failure, ParsingFailure, Maybe, ValidationFailure } from './libs'
 const { pipe, tap, match, randomBytes, takeN, dateToStr, serializeToBase64, deserializeFromBase64 } = Funcs
 
@@ -81,10 +81,10 @@ const makeTryAcceptReservation =
     const tryAcceptReservation = Reservation.tryAccept(totalCapacity)
 
     return Task.fromEither(Reservation.tryCreate(input))
-      .chain(res =>
+      .chain(reservation =>
         db
-          .findWhen(r => dateToStr(r.date) == dateToStr(res.date))
-          .map(list => tryAcceptReservation(res)(list))
+          .findWhen(r => dateToStr(r.date) == dateToStr(reservation.date))
+          .map(tryAcceptReservation(reservation))
           .chain(Task.fromEither),
       )
       .chain(Task.tap(db.saveReservation))
@@ -128,7 +128,7 @@ const makeFileRepo = (): ReservationsRepository => {
       .map(
         pipe(
           content => content.split('\n').filter(str => str.trim()),
-          List.fromArray,
+          List.fromArray.bind(List),
           lines => lines.map(deserializeReservation),
           ls => ls.sequenceEither<ParsingFailure, Reservation>(),
         ),
@@ -155,24 +155,29 @@ const tryAcceptReservation = makeTryAcceptReservation(fileRepo)
 const getReservationById = makeGetReservationById(fileRepo)
 const getLastClientReservations = makeGetLastClientReservations(fileRepo)
 
-//-- Controllers
+// = express APP
 type ResponsePair<T = unknown> = [number, T]
 
 const setWithCode =
   <T = unknown>(code: number) =>
   (data: T): ResponsePair<T> => [code, data]
 
-const setSuccessResponse =
-  <T = unknown>(res: restify.Response) =>
-  ([code, data]: ResponsePair<T>) => {
-    res.status(code)
-    res.json(data)
+const setResponse =
+  <T = unknown>(res: express.Response) =>
+  ([code, data]: ResponsePair<T>): void => {
+    // eslint-disable-next-line functional/no-expression-statements
+    res.status(code).json(data)
   }
 
-const handleCreateReservationRoute: restify.RequestHandler = (req, res, next) => {
-  const inputSchema = z.object({ clientName: z.string(), seats: z.number() })
+const callNext = (next: express.NextFunction) => () => next()
 
-  Task.fromEither(Either.fromTry(() => inputSchema.parse(req.body)).leftMap(ValidationFailure.create))
+// Controllers
+const createReservationCtrl: express.RequestHandler = (req, res, next) =>
+  Task.fromEither(
+    Either.fromTry(() => z.object({ clientName: z.string(), seats: z.number() }).parse(req.body)).leftMap(
+      ValidationFailure.create,
+    ),
+  )
     .chain(tryAcceptReservation(30))
     .rejectMap(
       pipe(
@@ -183,43 +188,35 @@ const handleCreateReservationRoute: restify.RequestHandler = (req, res, next) =>
               { code: 'VALIDATION' },
               { code: 'INVALID_NAME' },
               { code: 'INVALID_SEATS' },
-              f => new errors.BadRequestError(f.message),
+              f => new httpErrors.BadRequest(f.message),
             )
-            .with({ code: 'NO_CAPACITY' }, f => new errors.PreconditionFailedError(f.message))
-            .with({ code: 'DB_FAILURE' }, () => new errors.InternalError())
+            .with({ code: 'NO_CAPACITY' }, f => new httpErrors.PreconditionFailed(f.message))
+            .with({ code: 'DB_FAILURE' }, () => new httpErrors.InternalServerError())
             .exhaustive(),
       ),
     )
-    .fork(next, pipe(setWithCode(201), setSuccessResponse(res), next))
-}
+    .fork(next, pipe(setWithCode(201), setResponse(res), callNext(next)))
 
-const handleGetReservationById: restify.RequestHandler = (req, res, next) => {
-  Task.fromEither(Either.fromTry(() => req.params.id.toString()).leftMap(ValidationFailure.create))
+const getReservationByIdCtrl: express.RequestHandler<{ id: string }> = (req, res, next) =>
+  Task.of<never, string>(req.params.id)
     .chain(getReservationById)
     .rejectMap(
       pipe(
         tap(f => Failure.log(f)),
         failure =>
           match(failure)
-            .with({ code: 'VALIDATION' }, f => new errors.BadRequestError(f.message))
-            .with({ code: 'NOT_FOUND' }, f => new errors.ResourceNotFoundError(f.message))
-            .with({ code: 'DB_FAILURE' }, () => new errors.InternalError())
+            .with({ code: 'NOT_FOUND' }, f => new httpErrors.NotFound(f.message))
+            .with({ code: 'DB_FAILURE' }, () => new httpErrors.InternalServerError())
             .exhaustive(),
       ),
     )
-    .fork(next, pipe(setWithCode(200), setSuccessResponse(res), next))
-}
+    .fork(next, pipe(setWithCode(200), setResponse(res), callNext(next)))
 
-const handleGetLastReservationsByClientName: restify.RequestHandler = (req, res, next) => {
-  const inputSchema = z.object({ clientName: z.string(), count: z.number() })
-
+const getReservationsByNameCtrl: express.RequestHandler<{ name: string }> = (req, res, next) =>
   Task.fromEither(
-    Either.fromTry(() =>
-      inputSchema.parse({
-        clientName: req.params.name,
-        count: JSON.parse(req.body).count,
-      }),
-    ).leftMap(ValidationFailure.create),
+    Either.fromTry(() => z.object({ count: z.number() }).parse(req.body))
+      .leftMap(ValidationFailure.create)
+      .map(({ count }) => ({ count, clientName: req.params.name })),
   )
     .chain(getLastClientReservations)
     .map(list => list.toArray())
@@ -228,19 +225,17 @@ const handleGetLastReservationsByClientName: restify.RequestHandler = (req, res,
         tap(f => Failure.log(f)),
         failure =>
           match(failure)
-            .with({ code: 'VALIDATION' }, f => new errors.BadRequestError(f.message))
-            .with({ code: 'DB_FAILURE' }, () => new errors.InternalError())
+            .with({ code: 'VALIDATION' }, f => new httpErrors.BadRequest(f.message))
+            .with({ code: 'DB_FAILURE' }, () => new httpErrors.InternalServerError())
             .exhaustive(),
       ),
     )
-    .fork(next, pipe(setWithCode(200), setSuccessResponse(res), next))
-}
-// -- App
-const server = restify.createServer({ name: 'myapp', version: '1.0.0' })
-server.use(restify.plugins.queryParser()).use(restify.plugins.bodyParser())
+    .fork(next, pipe(setWithCode(200), setResponse(res), callNext(next)))
 
-server.post('/reservation', handleCreateReservationRoute)
-server.get('/reservation/:id', handleGetReservationById)
-server.get('/reservation/client/:name', handleGetLastReservationsByClientName)
-
-server.listen(3030, () => console.log('%s listening at %s', server.name, server.url))
+// eslint-disable-next-line functional/no-expression-statements
+express()
+  .use(express.json())
+  .post('/reservation', createReservationCtrl)
+  .get('/reservation/:id', getReservationByIdCtrl)
+  .get('/reservation/client/:name', getReservationsByNameCtrl)
+  .listen(3030, () => console.log('listening on port 3030'))

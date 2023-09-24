@@ -1,17 +1,33 @@
 {
   "root": true,
   "parser": "@typescript-eslint/parser",
-  "plugins": ["@typescript-eslint", "prettier"],
+  "parserOptions": { "project": true },
+  "plugins": ["@typescript-eslint", "prettier", "functional"],
   "extends": [
     "eslint:recommended",
     "plugin:@typescript-eslint/eslint-recommended",
     "plugin:@typescript-eslint/recommended",
+    "plugin:@typescript-eslint/recommended-requiring-type-checking",
+    "plugin:functional/external-typescript-recommended",
+    "plugin:functional/stylistic",
     "prettier"
   ],
   "rules": {
     "no-console": 0,
     "no-unused-vars": "off",
     "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
-    "arrow-parens": ["warn", "as-needed"]
+    "arrow-parens": ["warn", "as-needed"],
+    "@typescript-eslint/unbound-method": ["error", { "ignoreStatic": true }],
+    "functional/prefer-immutable-types": "off",
+    "functional/no-throw-statements": ["error", { "allowInAsyncFunctions": true }],
+    "functional/no-try-statements": "error",
+    "functional/immutable-data": "error",
+    "functional/no-let": ["error", { "allowInForLoopInit": true, "ignoreIdentifierPattern": "mutable_*" }],
+    "functional/no-mixed-types": "error",
+    "functional/no-this-expressions": "error",
+    "functional/no-classes": "error",
+    "functional/no-conditional-statements": ["error", { "allowReturningBranches": true }],
+    "functional/no-expression-statements": ["error", { "ignoreVoid": true }],
+    "functional/no-loop-statements": "error"
   }
 }

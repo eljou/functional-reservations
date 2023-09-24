@@ -90,12 +90,7 @@ const makeTryAcceptReservation =
     const tryAcceptReservation = Reservation.tryAccept(totalCapacity)
 
     return Task.fromEither(Reservation.tryCreate(input))
-      .chain(res =>
-        db
-          .findByDate(res.date)
-          .map(list => tryAcceptReservation(res)(list))
-          .chain(Task.fromEither),
-      )
+      .chain(res => db.findByDate(res.date).map(tryAcceptReservation(res)).chain(Task.fromEither))
       .chain(Task.tap(db.saveReservation))
   }
 
@@ -132,7 +127,7 @@ const makeFileRepo = (): ReservationsRepository => {
       .map(
         pipe(
           content => content.split('\n').filter(str => str.trim()),
-          List.fromArray,
+          List.fromArray.bind(List),
           lines => lines.map(deserializeReservation),
           ls => ls.sequenceEither<ParsingFailure, Reservation>(),
         ),
@@ -199,4 +194,5 @@ async function application() {
   if (workflowResponse != 'Exit') return application()
 }
 
+// eslint-disable-next-line functional/no-expression-statements
 application().catch(console.error)
