@@ -1,7 +1,6 @@
 import { readLn, Either, Task, Funcs, List, z, Schema, File, Failure, ParsingFailure, Maybe } from './libs'
 const {
   pipe,
-  tap,
   match,
   randomBytes,
   ignore,
@@ -46,7 +45,7 @@ const createReservation =
     clientName,
     seats,
     date: new Date(),
-    accepted: true,
+    accepted: false,
   })
 
 const Reservation = {
@@ -59,7 +58,7 @@ const Reservation = {
     (capacity: number) =>
     (reservation: Reservation): ((rs: List<Reservation>) => Either<Failure<'NO_CAPACITY'>, Reservation>) =>
       pipe(
-        (rs): number => rs.foldRight(0)((r, total) => total + r.seats),
+        listOfReservations => listOfReservations.foldRight(0)((r, total) => r.seats + total),
         (reservedSeats): Either<Failure<'NO_CAPACITY'>, Reservation> =>
           reservedSeats + reservation.seats <= capacity
             ? Either.right({ ...reservation, accepted: true })
@@ -83,7 +82,7 @@ interface ReservationsRepository {
 type Input = Parameters<typeof Reservation.tryCreate>[0]
 type UseCaseErrors = DbFailure | Failure<'NO_CAPACITY'> | ValidationFailure
 
-const makeTryAcceptReservation =
+export const makeTryToReserve =
   (db: ReservationsRepository) =>
   (totalCapacity: number) =>
   (input: Input): Task<UseCaseErrors, Reservation> => {
@@ -124,15 +123,15 @@ const makeFileRepo = (): ReservationsRepository => {
 
   const getRecords = () =>
     File.fsReadFile(dbPath)
-      .map(
+      .chain(
         pipe(
           content => content.split('\n').filter(str => str.trim()),
           List.fromArray.bind(List),
           lines => lines.map(deserializeReservation),
           ls => ls.sequenceEither<ParsingFailure, Reservation>(),
+          Task.fromEither,
         ),
       )
-      .chain(Task.fromEither)
       .rejectMap(f => DbFailure.create(new Error(`${f.code}: ${f.message}`)))
 
   return {
@@ -150,24 +149,19 @@ const makeFileRepo = (): ReservationsRepository => {
 //-- Dependency Inyection
 const fileRepo = makeFileRepo()
 
-const tryAcceptReservation = makeTryAcceptReservation(fileRepo)
+const tryAcceptReservation = makeTryToReserve(fileRepo)
 const getReservationById = makeGetReservationById(fileRepo)
 
 //-- Controllers
 const readClientName = () => readLn('Your name: ')
-
 const readSeats = () => readLn('Seats to reserve: ').chain(pipe(parseStrToNumber, Task.fromEither))
 
 const runCreateReservation = () =>
   readClientName()
     .chain(clientName => readSeats().map(seats => ({ clientName, seats })))
-    .map(tap(() => console.log('-----')))
     .chain(tryAcceptReservation(30 /* move to ENV */))
 
-const runGetReservationById = () =>
-  readLn('Reservation id: ')
-    .map(tap(() => console.log('-----')))
-    .chain(getReservationById)
+const runGetReservationById = () => readLn('Reservation id: ').chain(getReservationById)
 
 // --- App
 const runController = (ctrl: Task<Failure, unknown>) =>

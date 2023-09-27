@@ -1,7 +1,6 @@
 import { readLn, Either, Task, Funcs, List, z, Schema, File, Failure, ParsingFailure, Maybe } from './libs'
 const {
   pipe,
-  tap,
   match,
   randomBytes,
   takeN,
@@ -47,7 +46,7 @@ const createReservation =
     clientName,
     seats,
     date: new Date(),
-    accepted: true,
+    accepted: false,
   })
 
 const Reservation = {
@@ -60,7 +59,7 @@ const Reservation = {
     (capacity: number) =>
     (reservation: Reservation): ((rs: List<Reservation>) => Either<Failure<'NO_CAPACITY'>, Reservation>) =>
       pipe(
-        (rs): number => rs.foldRight(0)((r, total) => total + r.seats),
+        listOfReservations => listOfReservations.foldRight(0)((r, total) => r.seats + total),
         (reservedSeats): Either<Failure<'NO_CAPACITY'>, Reservation> =>
           reservedSeats + reservation.seats <= capacity
             ? Either.right({ ...reservation, accepted: true })
@@ -84,7 +83,7 @@ interface ReservationsRepository {
 type Input = Parameters<typeof Reservation.tryCreate>[0]
 type UseCaseErrors = DbFailure | Failure<'NO_CAPACITY'> | ValidationFailure
 
-const makeTryAcceptReservation =
+export const makeTryToReserve =
   (db: ReservationsRepository) =>
   (totalCapacity: number) =>
   (input: Input): Task<UseCaseErrors, Reservation> => {
@@ -161,7 +160,7 @@ const makeFileRepo = (): ReservationsRepository => {
 //-- Dependency Inyection
 const fileRepo = makeFileRepo()
 
-const tryAcceptReservation = makeTryAcceptReservation(fileRepo)
+const tryAcceptReservation = makeTryToReserve(fileRepo)
 const getReservationById = makeGetReservationById(fileRepo)
 const getLastClientReservations = makeGetLastClientReservations(fileRepo)
 
@@ -175,18 +174,13 @@ const readSeats = () => readInt('Seats to reserve: ')
 const runCreateReservation = () =>
   readClientName()
     .chain(clientName => readSeats().map(seats => ({ clientName, seats })))
-    .map(tap(() => console.log('-----')))
     .chain(tryAcceptReservation(30 /* move to ENV */))
 
-const runGetReservationById = () =>
-  readLn('Reservation id: ')
-    .map(tap(() => console.log('-----')))
-    .chain(getReservationById)
+const runGetReservationById = () => readLn('Reservation id: ').chain(getReservationById)
 
 const runGetClientReservations = () =>
   readClientName()
     .chain(clientName => readInt('Limit :').map(count => ({ clientName, count })))
-    .map(tap(() => console.log('-----')))
     .chain(getLastClientReservations)
     .map(ls => ls.toArray())
 

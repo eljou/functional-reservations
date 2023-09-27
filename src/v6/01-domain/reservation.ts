@@ -35,7 +35,7 @@ const createReservation =
     clientName,
     seats,
     date: new Date(),
-    accepted: true,
+    accepted: false,
   })
 
 export const Reservation = {

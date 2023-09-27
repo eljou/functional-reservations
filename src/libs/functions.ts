@@ -5,8 +5,8 @@ import { deserialize, serialize } from 'bson'
 import { match } from 'ts-pattern'
 import { ParsingFailure } from './failure'
 
-export const jsonParse = <T = unknown>(obj: string): Either<ParsingFailure, T> =>
-  Either.fromTry(() => JSON.parse(obj)).leftMap(ParsingFailure.create)
+export const jsonParse = (obj: string): Either<ParsingFailure, unknown> =>
+  Either.fromTry(() => JSON.parse(obj) as unknown).leftMap(ParsingFailure.create)
 
 export const parseStrToNumber = (str: string): Either<ParsingFailure, number> =>
   Either.of<ParsingFailure, number>(parseInt(str)).chain(
@@ -22,14 +22,14 @@ export const serializeToBase64: (ob: object) => string = pipe(
   buffer => buffer.toString('base64'),
 )
 
-type FromB64Deserializer<T> = (str: string) => Either<ParsingFailure, T>
 export const deserializeFromBase64 =
-  <T>(schema: Schema<T>): FromB64Deserializer<T> =>
+  <T>(schema: Schema<T>): ((str: string) => Either<ParsingFailure, T>) =>
   str =>
     Either.of<ParsingFailure, Buffer>(Buffer.from(str, 'base64'))
       .chain(b => Either.fromTry(() => deserialize(b)).leftMap(ParsingFailure.create))
+      .map(doc => schema.safeParse(doc))
       .chain(doc =>
-        match<ReturnType<typeof schema.safeParse>, Either<ParsingFailure, T>>(schema.safeParse(doc))
+        match<ReturnType<typeof schema.safeParse>, Either<ParsingFailure, T>>(doc)
           .with({ success: true }, r => Either.right(r.data))
           .with({ success: false }, r => Either.left(ParsingFailure.create(r.error)))
           .exhaustive(),

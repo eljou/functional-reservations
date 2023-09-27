@@ -6,7 +6,7 @@ const { dateToStr, pipe } = Funcs
 export type Input = Parameters<typeof Reservation.tryCreate>[0]
 export type UseCaseErrors = DbFailure | Failure<'NO_CAPACITY'> | DomainValidationFailure
 
-export const makeTryAcceptReservation =
+export const makeTryToReserve =
   (db: ReservationsRepository) =>
   (totalCapacity: number) =>
   (input: Input): Task<UseCaseErrors, Reservation> => {

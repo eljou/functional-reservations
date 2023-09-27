@@ -1,7 +1,6 @@
 import { readLn, Either, Task, Funcs, List, z, Schema, File, Failure, ParsingFailure } from './libs'
 const {
   pipe,
-  tap,
   match,
   randomBytes,
   ignore,
@@ -11,6 +10,8 @@ const {
   serializeToBase64,
   deserializeFromBase64,
 } = Funcs
+
+//-- Domain
 
 type InvalidSeats = Failure<'INVALID_SEATS'>
 const InvalidSeats = {
@@ -46,7 +47,7 @@ const createReservation =
     clientName,
     seats,
     date: new Date(),
-    accepted: true,
+    accepted: false,
   })
 
 const Reservation = {
@@ -59,7 +60,7 @@ const Reservation = {
     (capacity: number) =>
     (reservation: Reservation): ((rs: List<Reservation>) => Either<Failure<'NO_CAPACITY'>, Reservation>) =>
       pipe(
-        (rs): number => rs.foldRight(0)((r, total) => total + r.seats),
+        listOfReservations => listOfReservations.foldRight(0)((r, total) => r.seats + total),
         (reservedSeats): Either<Failure<'NO_CAPACITY'>, Reservation> =>
           reservedSeats + reservation.seats <= capacity
             ? Either.right({ ...reservation, accepted: true })
@@ -77,10 +78,11 @@ interface ReservationsRepository {
   saveReservation: (r: Reservation) => Task<DbFailure, void>
 }
 
+//-- Application
 type Input = Parameters<typeof Reservation.tryCreate>[0]
 type UseCaseErrors = Failure<'DB_FAILURE'> | Failure<'NO_CAPACITY'> | ValidationFailure
 
-export const makeTryAcceptReservation =
+export const makeTryToReserve =
   (db: ReservationsRepository) =>
   (totalCapacity: number) =>
   (input: Input): Task<UseCaseErrors, Reservation> => {
@@ -92,6 +94,7 @@ export const makeTryAcceptReservation =
   }
 
 //-- Infra
+
 const makeFileRepo = (): ReservationsRepository => {
   const dbPath = './src/data.txt'
 
@@ -110,16 +113,16 @@ const makeFileRepo = (): ReservationsRepository => {
   return {
     findByDate: date =>
       File.fsReadFile(dbPath)
-        .map(
+        .chain(
           pipe(
             content => content.split('\n').filter(str => str.trim()),
             List.fromArray.bind(List),
             lines => lines.map(deserializeReservation),
             ls => ls.sequenceEither<ParsingFailure, Reservation>(),
-            e => e.map(ls => ls.filter(r => dateToStr(r.date) == dateToStr(date))),
+            Task.fromEither,
           ),
         )
-        .chain(Task.fromEither)
+        .map(ls => ls.filter(r => dateToStr(r.date) == dateToStr(date)))
         .rejectMap(f => DbFailure.create(new Error(`${f.code}: ${f.message}`))),
 
     saveReservation: reservation =>
@@ -130,17 +133,15 @@ const makeFileRepo = (): ReservationsRepository => {
 }
 
 //-- Dependency Inyection
-const tryAcceptReservation = makeTryAcceptReservation(makeFileRepo())
+const tryAcceptReservation = makeTryToReserve(makeFileRepo())
 
 //-- Controllers
 const readClientName = () => readLn('Your name: ')
-
-const readSeats = () => readLn('Seats to reserve: ').chain(pipe(parseStrToNumber, Task.fromEither))
+const readSeats = () => readLn('Seats to reserve: ').chain(pipe(s => parseStrToNumber(s), Task.fromEither))
 
 const initCreateReservation = () =>
   readClientName()
     .chain(clientName => readSeats().map(seats => ({ clientName, seats })))
-    .map(tap(() => console.log('-----')))
     .chain(tryAcceptReservation(30 /* move to ENV */))
 
 // --- App
